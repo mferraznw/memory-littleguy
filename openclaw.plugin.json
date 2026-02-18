@@ -1,0 +1,54 @@
+{
+  "id": "memory-littleguy",
+  "kind": "memory",
+  "name": "Memory (LittleGuy)",
+  "description": "LittleGuy knowledge graph as long-term memory with auto-recall and auto-capture",
+  "uiHints": {
+    "apiKey": {
+      "label": "LittleGuy API Key",
+      "sensitive": true,
+      "placeholder": "lgk_..."
+    },
+    "baseUrl": {
+      "label": "LittleGuy API URL",
+      "placeholder": "https://littleguy-production.up.railway.app"
+    },
+    "autoCapture": {
+      "label": "Auto-Capture",
+      "help": "Automatically capture conversation turns to LittleGuy"
+    },
+    "autoRecall": {
+      "label": "Auto-Recall",
+      "help": "Automatically inject relevant memories from LittleGuy into context"
+    }
+  },
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "apiKey": { "type": "string" },
+      "baseUrl": { "type": "string" },
+      "autoCapture": { "type": "boolean" },
+      "autoRecall": { "type": "boolean" },
+      "captureMinLength": {
+        "type": "number",
+        "minimum": 10,
+        "maximum": 5000,
+        "description": "Minimum message length to auto-capture (default 20)"
+      },
+      "recallTopK": {
+        "type": "number",
+        "minimum": 1,
+        "maximum": 20,
+        "description": "Max memories to inject per turn (default 5)"
+      },
+      "recallMinScore": {
+        "type": "number",
+        "minimum": 0,
+        "maximum": 1,
+        "description": "Minimum relevance score for recall (default 0.35)"
+      }
+    },
+    "required": ["apiKey"]
+  }
+}
