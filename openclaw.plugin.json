@@ -11,15 +11,79 @@
     },
     "baseUrl": {
       "label": "LittleGuy API URL",
-      "placeholder": "https://littleguy-production.up.railway.app"
+      "placeholder": "https://mcp.littleguy.app"
+    },
+    "requestTimeoutMs": {
+      "label": "Request Timeout (ms)",
+      "help": "How long to wait for LittleGuy API calls."
+    },
+    "debugLogging": {
+      "label": "Debug Logging",
+      "help": "Enable verbose call-level logging for troubleshooting."
+    },
+    "startupProbe": {
+      "label": "Startup Probe",
+      "help": "Send a quick call to verify API key/session on plugin startup."
+    },
+    "cacheTurnsEnabled": {
+      "label": "Cache Turns",
+      "help": "Write every user/assistant turn into LittleGuy continuity cache."
     },
     "autoCapture": {
       "label": "Auto-Capture",
-      "help": "Automatically capture conversation turns to LittleGuy"
+      "help": "Capture selected content to Long-term graph memory."
     },
     "autoRecall": {
       "label": "Auto-Recall",
       "help": "Automatically inject relevant memories from LittleGuy into context"
+    },
+    "recallFromCache": {
+      "label": "Recall from Continuity Cache",
+      "help": "Inject recent cross-client turns on session start"
+    },
+    "alwaysHydrateOnStart": {
+      "label": "Refresh Cache on Every Start",
+      "help": "Always call get_recent_turns instead of using timer-based cache gating"
+    },
+    "excludeCurrentConversationFromCache": {
+      "label": "Exclude Current Conversation",
+      "help": "Skip continuity turns from the current conversation when hydrating"
+    },
+    "includeAssistantInCache": {
+      "label": "Cache Assistant Turns",
+      "help": "Capture assistant responses in the continuity cache"
+    },
+    "cacheRehydrateMs": {
+      "label": "Cache Rehydrate Interval (ms)",
+      "help": "Reload continuity cache when older than this value"
+    },
+    "topicSimilarityThreshold": {
+      "label": "Topic Similarity Threshold",
+      "help": "Skip recall when current topic signature is this similar to prior topic (0.1-0.95)"
+    },
+    "topicRecallStaleMs": {
+      "label": "Topic Recall Staleness Window (ms)",
+      "help": "Force a topic recall if topic appears unchanged for longer than this duration."
+    },
+    "topicDriftEnabled": {
+      "label": "Use Server Topic Drift",
+      "help": "Use server-side topic_drift check to decide whether unified_search should run on start."
+    },
+    "topicDriftUseEmbeddings": {
+      "label": "Topic Drift Embeddings",
+      "help": "Allow topic_drift to use semantic embeddings when available."
+    },
+    "topicDriftSemanticTopK": {
+      "label": "Topic Drift Semantic Candidate Count",
+      "help": "How many semantic neighbors to inspect for topic comparison."
+    },
+    "topicHistoryMinutes": {
+      "label": "Topic History Window (minutes)",
+      "help": "How far back to remember prior topics for returning-to-topic detection"
+    },
+    "topicRecallMinSignalWords": {
+      "label": "Topic Signature Size",
+      "help": "Max number of significant words used to detect topic changes"
     }
   },
   "configSchema": {
@@ -28,8 +92,19 @@
     "properties": {
       "apiKey": { "type": "string" },
       "baseUrl": { "type": "string" },
-      "autoCapture": { "type": "boolean" },
+    "requestTimeoutMs": {
+      "type": "number",
+      "minimum": 1000,
+      "maximum": 120000,
+      "description": "Request timeout in milliseconds for each tool call (default: 15000)"
+    },
+    "debugLogging": { "type": "boolean" },
+    "startupProbe": { "type": "boolean" },
+    "cacheTurnsEnabled": { "type": "boolean" },
+    "autoCapture": { "type": "boolean" },
       "autoRecall": { "type": "boolean" },
+      "recallFromCache": { "type": "boolean" },
+      "alwaysHydrateOnStart": { "type": "boolean" },
       "captureMinLength": {
         "type": "number",
         "minimum": 10,
@@ -40,13 +115,75 @@
         "type": "number",
         "minimum": 1,
         "maximum": 20,
-        "description": "Max memories to inject per turn (default 5)"
+        "description": "Max memories to inject per turn (default 8)"
       },
       "recallMinScore": {
         "type": "number",
         "minimum": 0,
         "maximum": 1,
         "description": "Minimum relevance score for recall (default 0.35)"
+      },
+      "recentTurnsLimit": {
+        "type": "number",
+        "minimum": 1,
+        "maximum": 200,
+        "description": "Number of cached turns to inject on agent start (default 150)"
+      },
+      "cacheTurnMaxChars": {
+        "type": "number",
+        "minimum": 100,
+        "maximum": 10000,
+        "description": "Maximum characters to keep per cached turn (default 2500)"
+      },
+      "cacheRehydrateMs": {
+        "type": "number",
+        "minimum": 1000,
+        "maximum": 300000,
+        "description": "Refresh cache context if older than this (ms, default 120000)"
+      },
+      "topicSimilarityThreshold": {
+        "type": "number",
+        "minimum": 0.1,
+        "maximum": 0.95,
+        "description": "Similarity threshold for skipping unified_search on same topic (default 0.38)"
+      },
+    "topicDriftEnabled": {
+      "type": "boolean",
+      "description": "Enable server-side topic_drift decision making before recall."
+    },
+    "topicDriftUseEmbeddings": {
+      "type": "boolean",
+      "description": "Allow topic_drift to use semantic embeddings when available."
+    },
+    "topicDriftSemanticTopK": {
+      "type": "number",
+      "minimum": 3,
+      "maximum": 240,
+      "description": "Number of semantic candidates topic_drift should inspect."
+    },
+    "topicRecallStaleMs": {
+        "type": "number",
+        "minimum": 300000,
+        "maximum": 43200000,
+        "description": "Force fresh recall after this many ms even when topic is unchanged (default 21600000)"
+      },
+      "topicHistoryMinutes": {
+        "type": "number",
+        "minimum": 30,
+        "maximum": 1440,
+        "description": "Consider prior topics within this many minutes for return-to-topic detection (default 360)"
+      },
+      "topicRecallMinSignalWords": {
+        "type": "number",
+        "minimum": 2,
+        "maximum": 20,
+        "description": "Number of top terms used to build topic signature (default 4)"
+      },
+      "includeAssistantInCache": {
+        "type": "boolean"
+      },
+      "excludeCurrentConversationFromCache": {
+        "type": "boolean"
       }
     },
     "required": ["apiKey"]
