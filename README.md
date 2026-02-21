@@ -33,6 +33,24 @@ LittleGuy isn't another vector store with chat history dumped in. It's a **struc
 
 **Currently completely free** at [littleguy.app](https://littleguy.app).
 
+> 🆕 **ChatGPT now supports MCP** (February 2026) — connect LittleGuy's MCP server to ChatGPT directly. Same graph, same memory, every surface.
+
+📖 **[Full setup guide for OpenClaw, Claude.ai, and ChatGPT →](https://littleguy.app/docs/openclaw)**
+
+---
+
+## Getting Started
+
+### Step 1 — Create your LittleGuy account
+
+1. Go to **[littleguy.app](https://littleguy.app)** and sign up (free)
+2. You'll be prompted to name your LittleGuy — this is your agent's memory identity
+3. Once signed in, open your **Dashboard → Settings → API Keys**
+4. Click **Generate API Key** — it will look like `lgk_xxxxxxxxxxxxxxxx`
+5. Copy and store it somewhere safe — you'll need it for the plugin config
+
+> 💡 API keys are user-scoped. Each key gives full read/write access to your LittleGuy knowledge graph.
+
 ---
 
 ## Installation
