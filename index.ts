@@ -48,6 +48,7 @@ interface PluginConfig {
   baseUrl: string;
   requestTimeoutMs: number;
   debugLogging: boolean;
+  sessionFilter: "auto" | "main-only" | "all";
   startupProbe: boolean;
   autoCapture: boolean;
   cacheTurnsEnabled: boolean;
@@ -115,6 +116,11 @@ function parseConfig(raw: Record<string, unknown>): PluginConfig {
     ).replace(/\/+$/, ""),
     requestTimeoutMs: toNumber(raw.requestTimeoutMs ?? 15_000, 15_000, 1_000, 120_000),
     debugLogging: toBoolean(raw.debugLogging, false),
+    sessionFilter: (() => {
+      const v = raw.sessionFilter;
+      if (v === "main-only" || v === "all") return v;
+      return "auto";
+    })(),
     startupProbe: toBoolean(raw.startupProbe, true),
     autoCapture: toBoolean(raw.autoCapture, false),
     cacheTurnsEnabled: toBoolean(raw.cacheTurnsEnabled, true),
@@ -142,6 +148,24 @@ function parseConfig(raw: Record<string, unknown>): PluginConfig {
       ? "environment"
       : undefined,
   };
+}
+
+type SessionTier = "full" | "lite" | "none";
+
+function classifySessionTier(context: PluginHookAgentContext, cfg: PluginConfig): SessionTier {
+  if (cfg.sessionFilter === "all") return "full";
+  const agentId = context.agentId ?? "";
+  const sessionKey = context.sessionKey ?? "";
+  const provider = context.messageProvider ?? "";
+  if (cfg.sessionFilter === "main-only") {
+    const isMain = (agentId === "" || agentId === "main") && (sessionKey === "" || sessionKey.startsWith("agent:main"));
+    return isMain ? "full" : "none";
+  }
+  // auto
+  if (agentId && agentId !== "main") return "none";
+  if (sessionKey.includes("heartbeat") || sessionKey.includes("isolated")) return "none";
+  if (["discord", "telegram", "signal", "whatsapp", "slack"].includes(provider)) return "lite";
+  return "full";
 }
 
 // ============================================================================
@@ -1316,6 +1340,11 @@ const plugin = {
         const eventRecord = (event ?? {}) as Record<string, unknown>;
         const eventContext = normalizePluginContext(ctx ?? (eventRecord as { context?: PluginHookAgentContext }).context);
         const conversationContext = getConversationContext(eventContext);
+        const tier = classifySessionTier(eventContext, cfg);
+        if (tier === "none") {
+          if (cfg.debugLogging) api.logger.info(`memory-littleguy: tier=none conv=${conversationContext.conversationId}, skipping injection`);
+          return;
+        }
         const promptValue = (eventRecord as { prompt?: unknown }).prompt;
         const prompt = typeof promptValue === "string" ? promptValue.trim() : "";
         const topicText = detectTopicTextFromEvent(eventRecord);
@@ -1395,7 +1424,7 @@ const plugin = {
           }
         }
 
-        if (cfg.recallFromCache && shouldRefreshCache) {
+        if (cfg.recallFromCache && shouldRefreshCache && tier !== "lite") {
           try {
             const turns = await client.getRecentTurns(
               cfg.recentTurnsLimit,
@@ -1438,7 +1467,9 @@ const plugin = {
             const result = await client.unifiedSearch(
               query,
               {
-                topK: Math.min(Math.max(cfg.recallTopK * 2, cfg.recallTopK), 50),
+                topK: tier === "lite"
+                  ? Math.min(3, cfg.recallTopK)
+                  : Math.min(Math.max(cfg.recallTopK * 2, cfg.recallTopK), 50),
                 minScore: cfg.recallMinScore,
                 ...windowExclusion,
               },
@@ -1554,8 +1585,14 @@ const plugin = {
         const eventRecord = (event ?? {}) as Record<string, unknown>;
         const eventContext = normalizePluginContext(ctx ?? eventRecord.context as PluginHookAgentContext | undefined);
         const conversationContext = getConversationContext(eventContext);
+        const tier = classifySessionTier(eventContext, cfg);
+        if (tier === "none") {
+          if (cfg.debugLogging) api.logger.info(`memory-littleguy: tier=none conv=${conversationContext.conversationId}, skipping`);
+          return;
+        }
         const eventSuccess = eventRecord.success;
         const sessionFile = typeof eventRecord.sessionFile === "string" ? eventRecord.sessionFile : undefined;
+        const autoCaptureEnabledForTier = cfg.autoCapture && tier !== "lite";
 
         if (cfg.debugLogging) {
           api.logger.info(
@@ -1667,7 +1704,7 @@ const plugin = {
               hasCacheCandidates = true;
             }
 
-            if (cfg.autoCapture && shouldCaptureFromRole(role, normalizedText, cfg)) {
+            if (autoCaptureEnabledForTier && shouldCaptureFromRole(role, normalizedText, cfg)) {
               toCapture.push(role === "assistant" ? `[assistant] ${normalizedText.slice(0, 1000)}` : normalizedText);
             }
 
@@ -1730,7 +1767,7 @@ const plugin = {
             });
           }
 
-          if (!cfg.autoCapture || toCapture.length === 0) return;
+          if (!autoCaptureEnabledForTier || toCapture.length === 0) return;
 
           // Fire and forget — don't block the response
           const capturePromise = (async () => {

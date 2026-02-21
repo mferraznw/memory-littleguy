@@ -21,6 +21,10 @@
       "label": "Debug Logging",
       "help": "Enable verbose call-level logging for troubleshooting."
     },
+    "sessionFilter": {
+      "label": "Session Filter",
+      "help": "auto: full context in main session, lite in channels, nothing in sub-agents. main-only: only main session. all: everywhere (legacy)."
+    },
     "startupProbe": {
       "label": "Startup Probe",
       "help": "Send a quick call to verify API key/session on plugin startup."
@@ -99,6 +103,11 @@
       "description": "Request timeout in milliseconds for each tool call (default: 15000)"
     },
     "debugLogging": { "type": "boolean" },
+    "sessionFilter": {
+      "type": "string",
+      "enum": ["auto", "main-only", "all"],
+      "description": "Session injection tier. auto=smart (default), main-only=main session only, all=everywhere"
+    },
     "startupProbe": { "type": "boolean" },
     "cacheTurnsEnabled": { "type": "boolean" },
     "autoCapture": { "type": "boolean" },
