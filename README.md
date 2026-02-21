@@ -103,9 +103,10 @@ Sign up at [littleguy.app](https://littleguy.app), create a LittleGuy, and gener
 | `recallFromCache` | boolean | `true` | Inject recent cross-session turns on start |
 | `topicDriftEnabled` | boolean | `true` | Use server-side topic drift for smarter recall |
 | `topicDriftUseEmbeddings` | boolean | `true` | Semantic embedding support for topic comparison |
-| `recallTopK` | number | `8` | Max memories injected per turn |
+| `recallTopK` | number | `6` | Max memories injected per turn |
 | `recallMinScore` | number | `0.35` | Minimum relevance score for recall |
-| `recentTurnsLimit` | number | `150` | Cached turns injected on session start |
+| `recentTurnsLimit` | number | `25` | Cached turns injected on session start (keep low to avoid flooding context) |
+| `cacheTurnMaxChars` | number | `800` | Max chars per cached turn (truncates long turns) |
 | `includeAssistantInCache` | boolean | `false` | Cache assistant turns (off by default — user turns are the signal) |
 | `excludeCurrentConversationFromCache` | boolean | `true` | Skip current conversation when hydrating cache |
 | `topicSimilarityThreshold` | number | `0.38` | Skip recall when topic similarity exceeds this |
