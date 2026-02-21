@@ -127,7 +127,7 @@ function parseConfig(raw: Record<string, unknown>): PluginConfig {
     recentTurnsLimit: toNumber(raw.recentTurnsLimit ?? 150, 150, 1, 200),
     cacheTurnMaxChars: toNumber(raw.cacheTurnMaxChars ?? 2500, 2500, 100, 10000),
     cacheRehydrateMs: toNumber(raw.cacheRehydrateMs ?? 120_000, 120_000, 1000, 300_000),
-    includeAssistantInCache: raw.includeAssistantInCache !== false,
+    includeAssistantInCache: toBoolean(raw.includeAssistantInCache, false),
     excludeCurrentConversationFromCache: toBoolean(raw.excludeCurrentConversationFromCache, true),
     topicSimilarityThreshold: toNumber(raw.topicSimilarityThreshold, 0.38, 0.1, 0.95),
     topicRecallStaleMs: toNumber(raw.topicRecallStaleMs, 6 * 60 * 60 * 1000, 5 * 60 * 1000, 12 * 60 * 60 * 1000),

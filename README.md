@@ -88,6 +88,7 @@ Sign up at [littleguy.app](https://littleguy.app), create a LittleGuy, and gener
 | `recallTopK` | number | `8` | Max memories injected per turn |
 | `recallMinScore` | number | `0.35` | Minimum relevance score for recall |
 | `recentTurnsLimit` | number | `150` | Cached turns injected on session start |
+| `includeAssistantInCache` | boolean | `false` | Cache assistant turns (off by default — user turns are the signal) |
 | `excludeCurrentConversationFromCache` | boolean | `true` | Skip current conversation when hydrating cache |
 | `topicSimilarityThreshold` | number | `0.38` | Skip recall when topic similarity exceeds this |
 | `topicRecallStaleMs` | number | `21600000` | Force fresh recall after 6 hours even if topic unchanged |
