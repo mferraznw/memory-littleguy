@@ -473,6 +473,69 @@ const CACHE_TURNS_BATCH_SIZE = 200;
 const RUNTIME_LOG_PATH = "/tmp/memory-littleguy-openclaw-plugin.log";
 const LITTLEGUY_PROMPT_BLOCK_RE =
   /<littleguy-(?:turn-cache|context)>[\s\S]*?<\/littleguy-(?:turn-cache|context)>/g;
+// ============================================================================
+// Operational Noise Filter
+// ============================================================================
+// Patterns that identify system/operational content that should never be
+// captured into long-term memory or used as recall cache turns.
+// These are OpenClaw infrastructure messages, not user intent or decisions.
+
+const OPERATIONAL_NOISE_PATTERNS: RegExp[] = [
+  // Pre-compaction / memory flush system events
+  /\bpre-compaction memory flush\b/i,
+  /\bstore durable memories now\b/i,
+  /\bif the file already exists, append new content only\b/i,
+
+  // Heartbeat system messages
+  /\bHEARTBEAT_OK\b/,
+  /\bread heartbeat\.md if it exists\b/i,
+  /\bdo not infer or repeat old tasks from prior chats\b/i,
+
+  // Cron / email check tasks
+  /\bcheck all \d+ email accounts? for new unread\b/i,
+  /\bcheck.*email accounts?.*unread messages?\b/i,
+
+  // Gateway metadata blobs (OpenClaw inbound_meta JSON)
+  /["']schema["']\s*:\s*["']openclaw\.inbound_meta/i,
+  /["']message_id["']\s*:\s*["'][0-9a-f-]{36}["']/,
+  /Conversation info \(untrusted metadata\)/i,
+
+  // OpenClaw system messages
+  /^\[System Message\]/,
+  /^\[System:/,
+
+  // Very short operational acks
+  /^\s*NO_REPLY\s*$/,
+  /^\s*HEARTBEAT_OK\s*$/,
+
+  // Post-compaction audit messages
+  /\bpost-compaction audit\b/i,
+  /\brequired startup files were not read\b/i,
+];
+
+/**
+ * Returns true if the content is operational/infrastructure noise that should
+ * never be captured into long-term memory or recall cache.
+ */
+function isOperationalNoise(text: string): boolean {
+  const head = text.trimStart().slice(0, 600);
+  if (head.length === 0) return true;
+  for (const pattern of OPERATIONAL_NOISE_PATTERNS) {
+    if (pattern.test(head)) return true;
+  }
+  // Reject content that's mostly raw JSON (gateway metadata blobs)
+  const trimmed = head.trim();
+  if (trimmed.startsWith("{") || trimmed.startsWith("[{")) {
+    try {
+      JSON.parse(trimmed.length > 500 ? `${trimmed.slice(0, 500)}` : trimmed);
+      return true; // Valid JSON blob — likely metadata, not user content
+    } catch {
+      // Not clean JSON — might be legit content with embedded JSON, allow through
+    }
+  }
+  return false;
+}
+
 const TOPIC_STOP_WORDS = new Set<string>([
   "a",
   "an",
@@ -627,16 +690,30 @@ function getStateFilePath(context: PluginSessionContext): string | undefined {
   return join(context.workspaceDir, LITTLEGUY_PLUGIN_STATE_FILE);
 }
 
+// Minimum character length for autoCapture of user messages.
+// Raised from the config captureMinLength (which is for manual tool use) to
+// avoid capturing short/operational noise in the automatic pipeline.
+const AUTO_CAPTURE_USER_MIN_LENGTH = 80;
+
 function shouldCaptureFromRole(role: string, text: string, cfg: PluginConfig): boolean {
   const normalizedText = text.trim();
   if (!normalizedText) return false;
 
+  // Never capture LittleGuy injected context blocks
   if (normalizedText.includes("<littleguy-turn-cache>") || normalizedText.includes("<littleguy-context>")) {
     return false;
   }
   if (/^\s*<.*?>\s*<\/.+?>\s*$/s.test(normalizedText)) return false;
 
-  if (role === "user") return normalizedText.length >= cfg.captureMinLength;
+  // Never capture operational noise (heartbeats, cron, system events, metadata)
+  if (isOperationalNoise(normalizedText)) return false;
+
+  if (role === "user") {
+    // Use a higher bar than the raw captureMinLength for auto-capture:
+    // short messages are almost always noise (acks, single words, etc.)
+    const minLen = Math.max(cfg.captureMinLength, AUTO_CAPTURE_USER_MIN_LENGTH);
+    return normalizedText.length >= minLen;
+  }
   return (
     role === "assistant" &&
     normalizedText.length > 160 &&
@@ -1247,10 +1324,12 @@ function extractTextFromMessage(msg: unknown): string | null {
 
 /**
  * Summarize a set of messages into a compact session summary for compaction capture.
+ * Skips operational noise (heartbeats, cron prompts, system events, metadata blobs).
  */
 function summarizeForCompaction(messages: unknown[]): string {
   const lines: string[] = [];
   let turnCount = 0;
+  let skippedNoise = 0;
 
   for (const msg of messages) {
     if (!msg || typeof msg !== "object") continue;
@@ -1261,6 +1340,11 @@ function summarizeForCompaction(messages: unknown[]): string {
 
     // Only include user and assistant messages (skip system, tool results)
     if (role === "user" || role === "assistant") {
+      // Filter operational noise — heartbeats/crons add no memory value
+      if (isOperationalNoise(text)) {
+        skippedNoise++;
+        continue;
+      }
       const truncated = text.length > 500 ? text.slice(0, 500) + "..." : text;
       lines.push(`[${role}] ${truncated}`);
       turnCount++;
@@ -1268,7 +1352,8 @@ function summarizeForCompaction(messages: unknown[]): string {
   }
 
   if (lines.length === 0) return "";
-  return `Session summary (${turnCount} messages):\n\n${lines.join("\n\n")}`;
+  const noiseNote = skippedNoise > 0 ? ` (${skippedNoise} operational messages filtered)` : "";
+  return `Session summary (${turnCount} messages${noiseNote}):\n\n${lines.join("\n\n")}`;
 }
 
 // ============================================================================
@@ -1693,15 +1778,19 @@ const plugin = {
               const fallbackSequence = now + sequence;
               sequence += 1;
 
-              turnsToCache.push({
-                id: extractTurnId(m),
-                conversationId: conversationContext.conversationId,
-                role: role as "user" | "assistant",
-                content: trimForCache(normalizedText, cfg.cacheTurnMaxChars),
-                createdAt: extractTurnCreatedAt(m, fallbackCreatedAt),
-                sequence: extractTurnSequence(m, fallbackSequence),
-              });
-              hasCacheCandidates = true;
+              // Skip operational noise from the recall cache too — these turns
+              // add no value to recall context and just bloat the cache window.
+              if (!isOperationalNoise(normalizedText)) {
+                turnsToCache.push({
+                  id: extractTurnId(m),
+                  conversationId: conversationContext.conversationId,
+                  role: role as "user" | "assistant",
+                  content: trimForCache(normalizedText, cfg.cacheTurnMaxChars),
+                  createdAt: extractTurnCreatedAt(m, fallbackCreatedAt),
+                  sequence: extractTurnSequence(m, fallbackSequence),
+                });
+                hasCacheCandidates = true;
+              }
             }
 
             if (autoCaptureEnabledForTier && shouldCaptureFromRole(role, normalizedText, cfg)) {
@@ -1828,9 +1917,16 @@ const plugin = {
     api.on("before_compaction", (async (event: PluginHookBeforeCompactionEvent, ctx: PluginHookAgentContext) => {
       const eventContext = normalizePluginContext(ctx);
       const conversationContext = getConversationContext(eventContext);
+      // Only dump compaction summaries for full-tier sessions (main session).
+      // Heartbeats and sub-agents have nothing worth preserving across compaction.
+      const compactionTier = classifySessionTier(eventContext, cfg);
+      if (compactionTier === "none") {
+        if (cfg.debugLogging) api.logger.info(`memory-littleguy: before_compaction tier=none, skipping dump for ${conversationContext.conversationId}`);
+        return;
+      }
       if (eventContext.sessionKey) {
         api.logger.info?.(
-          `memory-littleguy: before_compaction sessionKey=${eventContext.sessionKey} sessionId=${eventContext.sessionId ?? "unknown"}`,
+          `memory-littleguy: before_compaction sessionKey=${eventContext.sessionKey} sessionId=${eventContext.sessionId ?? "unknown"} tier=${compactionTier}`,
         );
       }
       try {
